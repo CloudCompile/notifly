@@ -346,14 +346,10 @@ function renderNotifCard(notif, index) {
     </div>
   `;
 
-  // Click card → open GitHub
+  // Click card → open detail panel
   card.addEventListener('click', (e) => {
     if (e.target.closest('button, a')) return;
-    const url = notif.subject?.url
-      ?.replace('api.github.com/repos', 'github.com')
-      .replace('/pulls/', '/pull/');
-    if (url) window.open(url, '_blank', 'noopener');
-    // auto-mark as read
+    openDetailPanel(notif);
     if (!isRead) {
       state.readState[notif.id] = true;
       store.set(LS.READ_STATE, state.readState);
@@ -372,6 +368,199 @@ function renderNotifCard(notif, index) {
 
 function escHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── Detail panel ─────────────────────────────────────────────────────────────
+function closeDetailPanel() {
+  const panel = document.getElementById('detail-panel');
+  const overlay = document.getElementById('detail-overlay');
+  panel.classList.remove('open');
+  panel.classList.add('hidden');
+  overlay.classList.add('hidden');
+}
+
+async function openDetailPanel(notif) {
+  const panel  = document.getElementById('detail-panel');
+  const overlay = document.getElementById('detail-overlay');
+
+  // Show panel immediately with base info
+  panel.classList.remove('hidden');
+  overlay.classList.remove('hidden');
+  requestAnimationFrame(() => panel.classList.add('open'));
+  panel.focus();
+
+  const icon = typeIcon(notif.subject?.type, notif.reason);
+  const label = state.aiLabels[notif.id];
+  const priority = state.aiPriorities[notif.id];
+  const ghUrl = notif.subject?.url
+    ?.replace('api.github.com/repos', 'github.com')
+    .replace('/pulls/', '/pull/');
+
+  document.getElementById('detail-repo').textContent = notif.repository?.full_name || '';
+  document.getElementById('detail-title').textContent = notif.subject?.title || '';
+  document.getElementById('detail-type-icon').className = `detail-type-icon ${icon.cls}`;
+  document.getElementById('detail-type-icon').innerHTML = icon.html;
+  document.getElementById('detail-btn-github').href = ghUrl || '#';
+
+  // Badges
+  const badgesEl = document.getElementById('detail-badges');
+  badgesEl.innerHTML = '';
+  if (label) {
+    const lb = document.createElement('span');
+    lb.className = `label-badge label-${label}`;
+    lb.textContent = label;
+    badgesEl.appendChild(lb);
+  }
+  if (priority) {
+    const pb = document.createElement('span');
+    pb.className = `label-badge label-${priority === 'high' ? 'ci-failure' : priority === 'medium' ? 'review-requested' : 'fyi'}`;
+    pb.textContent = `${priority} priority`;
+    badgesEl.appendChild(pb);
+  }
+
+  // Meta grid (initial)
+  const metaEl = document.getElementById('detail-meta-grid');
+  const reason = notif.reason?.replace(/_/g, ' ') || '—';
+  metaEl.innerHTML = `
+    <div class="detail-meta-item">
+      <span class="detail-meta-label">Type</span>
+      <span class="detail-meta-value">${notif.subject?.type || '—'}</span>
+    </div>
+    <div class="detail-meta-item">
+      <span class="detail-meta-label">Reason</span>
+      <span class="detail-meta-value">${reason}</span>
+    </div>
+    <div class="detail-meta-item">
+      <span class="detail-meta-label">Updated</span>
+      <span class="detail-meta-value">${relativeTime(notif.updated_at)}</span>
+    </div>
+    <div class="detail-meta-item">
+      <span class="detail-meta-label">Repo</span>
+      <span class="detail-meta-value mono" style="font-size:0.72rem">${notif.repository?.full_name || '—'}</span>
+    </div>
+  `;
+
+  // Action buttons wired for this notif
+  const readBtn = document.getElementById('detail-btn-read');
+  const doneBtn = document.getElementById('detail-btn-done');
+  readBtn.textContent = state.readState[notif.id] ? 'Mark unread' : 'Mark read';
+  readBtn.onclick = () => {
+    state.readState[notif.id] = !state.readState[notif.id];
+    store.set(LS.READ_STATE, state.readState);
+    readBtn.textContent = state.readState[notif.id] ? 'Mark unread' : 'Mark read';
+    if (state.readState[notif.id]) markRead(notif.id).catch(() => {});
+    updateUnreadBadge();
+    renderInbox();
+  };
+  doneBtn.onclick = () => {
+    state.doneState[notif.id] = true;
+    store.set(LS.DONE_STATE, state.doneState);
+    closeDetailPanel();
+    renderInbox();
+    toast('Marked done', 'success');
+  };
+
+  // AI summary
+  const aiEl = document.getElementById('detail-ai-text');
+  const aiSection = document.getElementById('detail-ai-section');
+  if (skKey()) {
+    aiEl.textContent = 'Generating summary…';
+    aiEl.classList.add('loading');
+    aiSection.classList.remove('hidden');
+    aiChat([
+      {
+        role: 'system',
+        content: 'You are a concise GitHub assistant. In 2-4 sentences, explain what this notification is about, why it matters, and what (if any) action the user should take. Be specific and direct.',
+      },
+      {
+        role: 'user',
+        content: `Notification: [${notif.reason}] ${notif.repository?.full_name}: ${notif.subject?.title} (${notif.subject?.type})`,
+      },
+    ]).then((text) => {
+      aiEl.textContent = text;
+      aiEl.classList.remove('loading');
+    }).catch(() => {
+      aiEl.textContent = 'Could not generate summary.';
+      aiEl.classList.remove('loading');
+    });
+  } else {
+    aiSection.classList.add('hidden');
+  }
+
+  // Fetch thread details from GitHub
+  const threadSection = document.getElementById('detail-thread-section');
+  const threadBody = document.getElementById('detail-thread-body');
+  threadSection.classList.add('hidden');
+  threadBody.innerHTML = '';
+
+  try {
+    const subjectUrl = notif.subject?.url;
+    if (!subjectUrl) return;
+
+    // subject.url is already a GitHub API URL like https://api.github.com/repos/owner/repo/pulls/123
+    const path = subjectUrl.replace('https://api.github.com', '');
+    const detail = await ghFetch(path);
+
+    // Status badge
+    const statusBadge = document.createElement('span');
+    const st = detail.merged ? 'merged' : detail.draft ? 'draft' : detail.state || '';
+    if (st) {
+      statusBadge.className = `detail-status-badge ${st}`;
+      statusBadge.innerHTML = `<span>●</span> ${st}`;
+      badgesEl.insertBefore(statusBadge, badgesEl.firstChild);
+    }
+
+    // Enrich meta
+    const author = detail.user?.login || '—';
+    metaEl.innerHTML += `
+      <div class="detail-meta-item">
+        <span class="detail-meta-label">Author</span>
+        <span class="detail-meta-value mono">${escHtml(author)}</span>
+      </div>
+      <div class="detail-meta-item">
+        <span class="detail-meta-label">Created</span>
+        <span class="detail-meta-value">${relativeTime(detail.created_at)}</span>
+      </div>
+    `;
+    if (detail.comments !== undefined) {
+      metaEl.innerHTML += `<div class="detail-meta-item"><span class="detail-meta-label">Comments</span><span class="detail-meta-value">${detail.comments}</span></div>`;
+    }
+    if (detail.commits !== undefined) {
+      metaEl.innerHTML += `<div class="detail-meta-item"><span class="detail-meta-label">Commits</span><span class="detail-meta-value">${detail.commits}</span></div>`;
+    }
+
+    // Fetch last 3 comments
+    if (detail.comments > 0 && detail.comments_url) {
+      const commentsPath = detail.comments_url.replace('https://api.github.com', '');
+      const comments = await ghFetch(`${commentsPath}?per_page=3&sort=updated&direction=desc`);
+      if (comments?.length > 0) {
+        threadSection.classList.remove('hidden');
+        comments.slice(0, 3).forEach((c) => {
+          const el = document.createElement('div');
+          el.className = 'detail-comment';
+          el.innerHTML = `
+            <div class="detail-comment-header">
+              <img class="detail-comment-avatar" src="${escHtml(c.user?.avatar_url || '')}" alt="${escHtml(c.user?.login || '')}" loading="lazy" />
+              <span class="detail-comment-author">${escHtml(c.user?.login || '—')}</span>
+              <span class="detail-comment-time">${relativeTime(c.updated_at || c.created_at)}</span>
+            </div>
+            <div class="detail-comment-body">${escHtml(c.body?.trim() || '')}</div>
+          `;
+          threadBody.appendChild(el);
+        });
+      }
+    }
+  } catch {
+    // Thread fetch failed silently — panel still shows base info
+  }
+}
+
+function initDetailPanel() {
+  document.getElementById('detail-close').addEventListener('click', closeDetailPanel);
+  document.getElementById('detail-overlay').addEventListener('click', closeDetailPanel);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeDetailPanel();
+  });
 }
 
 // ─── Apply filters ────────────────────────────────────────────────────────────
@@ -1001,6 +1190,7 @@ function bindGlobalEvents() {
 async function showApp() {
   showScreen('app');
   initRouter();
+  initDetailPanel();
   bindInboxEvents();
   bindDashboardEvents();
   bindDigestEvents();
