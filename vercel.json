@@ -15,7 +15,7 @@
     },
     {
       "path": "/api/cron/notify",
-      "schedule": "*/15 * * * *"
+      "schedule": "* * * * *"
     }
   ],
   "functions": {
