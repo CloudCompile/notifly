@@ -145,7 +145,7 @@ async function aiLabelBatch(notifications) {
     {
       role: 'system',
       content:
-        'You are a GitHub notification classifier. For each numbered notification, respond with ONLY its index and one label separated by a colon, one per line. Labels: mention, review-requested, ci-failure, noise, fyi. Example:\n0: mention\n1: ci-failure',
+        'You are a GitHub notification triage expert. Classify each notification with exactly one label. Labels and their meanings:\n- mention: you are directly @mentioned or the primary subject\n- review-requested: your code review is explicitly requested\n- ci-failure: a CI/CD build, test, or deployment failed\n- noise: automated bots, dependabot, routine updates, no action needed\n- fyi: discussion, merged PRs, general activity worth knowing but no action needed\n\nRespond ONLY with index:label pairs, one per line. Example:\n0: mention\n1: noise\n2: ci-failure',
     },
     { role: 'user', content: `Classify these notifications:\n${items}` },
   ]);
@@ -170,7 +170,7 @@ async function aiPrioritizeBatch(notifications) {
     {
       role: 'system',
       content:
-        'You are a GitHub notification prioritizer. For each numbered notification respond with ONLY index:priority, one per line. Priority values: high, medium, low. Example:\n0: high\n1: low',
+        'You are a developer productivity expert. Prioritize each GitHub notification:\n- high: blocks your work, needs response today, security issue, production incident, direct mention needing reply\n- medium: needs attention this week, review requested, PR feedback, important discussion\n- low: informational, already resolved, automated updates, no action required\n\nRespond ONLY with index:priority pairs, one per line. Example:\n0: high\n1: low',
     },
     { role: 'user', content: `Prioritize:\n${items}` },
   ]);
@@ -193,7 +193,7 @@ async function aiOverview(notifications) {
   return aiChat([
     {
       role: 'system',
-      content: 'You are a helpful GitHub assistant. Write 2-3 sentences summarizing the user\'s current notification inbox state. Be specific — mention repos or PR names. Conversational tone.',
+      content: 'You are a senior developer\'s personal assistant. In 3-4 sentences, give a sharp inbox briefing: what needs attention right now, any patterns or themes across repos, and whether the user is behind or on top of things. Be specific — name actual repos and PR titles. Conversational but professional.',
     },
     { role: 'user', content: `My current notifications:\n${summary}` },
   ]);
@@ -206,7 +206,7 @@ async function aiGenerateDigest(notifications) {
   return aiChat([
     {
       role: 'system',
-      content: 'Create a scannable GitHub notification digest. Use emoji section headers (🔴 Action Required, 🟡 FYI, ✅ Nothing Urgent). Highlight action items. Under 300 words.',
+      content: 'Create a concise GitHub notification digest. Structure it with these sections (skip empty ones):\n🔴 **Action Required** — things blocking progress or needing reply today\n🟡 **This Week** — PRs to review, discussions to engage with\n✅ **Done/FYI** — merged PRs, resolved issues, no action needed\n🤖 **Noise** — automated updates to be aware of\n\nFor each item include: repo name, brief description, and specific next action. Keep it under 350 words. Be direct and useful, not verbose.',
     },
     { role: 'user', content: `Digest these notifications:\n${summary}` },
   ]);
@@ -478,7 +478,7 @@ async function openDetailPanel(notif) {
     aiChat([
       {
         role: 'system',
-        content: 'You are a concise GitHub assistant. In 2-4 sentences, explain what this notification is about, why it matters, and what (if any) action the user should take. Be specific and direct.',
+        content: 'You are a concise code reviewer\'s assistant. For this GitHub notification, answer in 2-3 sentences:\n1. What is happening (specific context, not just the title)\n2. What action (if any) is needed and how urgent it is\n\nBe direct. If no action needed, say so clearly.',
       },
       {
         role: 'user',
