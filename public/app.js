@@ -39,6 +39,8 @@ const state = {
   filterRepo:    '',
   inboxType:     'all',
   loading:       false,
+  page:          1,
+  hasMore:       true,
 };
 
 // ─── GitHub API ───────────────────────────────────────────────────────────────
@@ -60,7 +62,24 @@ async function ghFetch(path, opts = {}) {
 }
 
 async function fetchNotifications() {
-  return ghFetch('/notifications?all=false&per_page=100&participating=false');
+  const res = await ghFetch('/notifications?all=false&per_page=100&participating=false&page=1');
+  state.page = 1;
+  state.hasMore = res.length === 100;
+  return res;
+}
+
+async function loadMoreNotifications() {
+  state.page++;
+  try {
+    const more = await ghFetch(`/notifications?all=false&per_page=100&participating=false&page=${state.page}`);
+    state.notifications.push(...more);
+    state.hasMore = more.length === 100;
+    store.set(LS.NOTIFICATIONS, state.notifications);
+    return more;
+  } catch (err) {
+    state.page--;
+    throw err;
+  }
 }
 
 async function markRead(threadId) {
@@ -343,6 +362,10 @@ function renderInbox() {
   visible.forEach((n, i) => {
     list.appendChild(renderNotifCard(n, i));
   });
+
+  // Show/hide load more button
+  const loadMoreArea = document.getElementById('load-more-area');
+  loadMoreArea.classList.toggle('hidden', !state.hasMore || visible.length === 0);
 
   updateRepoFilter();
 }
@@ -696,6 +719,23 @@ function bindInboxEvents() {
     } finally {
       btn.disabled = false;
       btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg> AI Label All';
+    }
+  });
+
+  // Load more
+  document.getElementById('btn-load-more')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-load-more');
+    btn.disabled = true;
+    btn.innerHTML = 'Loading…';
+    try {
+      await loadMoreNotifications();
+      renderInbox();
+      toast(`Loaded more notifications`, 'success');
+    } catch (err) {
+      toast(`Failed to load more: ${err.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = 'Load More';
     }
   });
 
