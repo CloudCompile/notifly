@@ -212,6 +212,14 @@ async function aiGenerateDigest(notifications) {
   ]);
 }
 
+// ─── Markdown renderer ────────────────────────────────────────────────────────
+function renderMd(text) {
+  if (!text) return '';
+  if (typeof marked === 'undefined') return escHtml(text).replace(/\n/g, '<br>');
+  marked.setOptions({ breaks: true, gfm: true });
+  return marked.parse(text);
+}
+
 async function syncLabelsToServer() {
   try {
     await fetch('/api/user/labels', {
@@ -477,7 +485,7 @@ async function openDetailPanel(notif) {
         content: `Notification: [${notif.reason}] ${notif.repository?.full_name}: ${notif.subject?.title} (${notif.subject?.type})`,
       },
     ]).then((text) => {
-      aiEl.textContent = text;
+      aiEl.innerHTML = renderMd(text);
       aiEl.classList.remove('loading');
     }).catch(() => {
       aiEl.textContent = 'Could not generate summary.';
@@ -544,7 +552,7 @@ async function openDetailPanel(notif) {
               <span class="detail-comment-author">${escHtml(c.user?.login || '—')}</span>
               <span class="detail-comment-time">${relativeTime(c.updated_at || c.created_at)}</span>
             </div>
-            <div class="detail-comment-body">${escHtml(c.body?.trim() || '')}</div>
+            <div class="detail-comment-body md-body">${renderMd(c.body?.trim() || '')}</div>
           `;
           threadBody.appendChild(el);
         });
@@ -706,7 +714,7 @@ function renderDashboard() {
   const overviewEl = document.getElementById('ai-overview-text');
   if (sk && notifs.length > 0) {
     aiOverview(notifs)
-      .then((text) => { overviewEl.textContent = text; })
+      .then((text) => { overviewEl.innerHTML = renderMd(text); })
       .catch(() => { overviewEl.textContent = 'AI overview unavailable.'; });
   } else if (!sk) {
     overviewEl.textContent = 'Connect your Pollinations account in Settings to enable AI overview.';
@@ -735,7 +743,7 @@ function renderDigest() {
   const countBadge = document.getElementById('digest-notif-count');
   countBadge.textContent = `${digestData.notification_count} notifications`;
   countBadge.className = 'badge badge-accent';
-  document.getElementById('digest-body').textContent = digestData.content;
+  document.getElementById('digest-body').innerHTML = renderMd(digestData.content);
 }
 
 // ─── Render settings ──────────────────────────────────────────────────────────
@@ -1044,7 +1052,7 @@ function bindDashboardEvents() {
     if (!skKey()) { toast('No Pollinations key', 'error'); return; }
     overviewEl.textContent = 'Generating…';
     aiOverview(state.notifications)
-      .then((text) => { overviewEl.textContent = text; })
+      .then((text) => { overviewEl.innerHTML = renderMd(text); })
       .catch(() => { overviewEl.textContent = 'AI overview unavailable.'; });
   });
 }
