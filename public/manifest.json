@@ -30,5 +30,6 @@
   "categories": ["productivity", "utilities"],
   "screenshots": [],
   "pollinations_app_key": "pk_goxULY8utSrbZyCp",
-  "vapid_public_key": "BFs187a5uWG1VZHCZeHa7zlQLIMfS29Zol_P_6iM9J6gjpH8r84QUwgO4zjK3yswL9vYgVdykXii-2qptqujAv8"
+  "vapid_public_key": "BFs187a5uWG1VZHCZeHa7zlQLIMfS29Zol_P_6iM9J6gjpH8r84QUwgO4zjK3yswL9vYgVdykXii-2qptqujAv8",
+  "app_url": "https://notifly.cjhauser.me"
 }

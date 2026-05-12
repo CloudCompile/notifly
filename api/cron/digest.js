@@ -128,9 +128,9 @@ export default async function handler(req, res) {
     return;
   }
 
-  const appUrl = process.env.VERCEL_URL
+  const appUrl = process.env.APP_URL || (process.env.VERCEL_URL
     ? `https://${process.env.VERCEL_URL}`
-    : 'http://localhost:3000';
+    : 'http://localhost:3000');
 
   const userIds = await kv.smembers(keys.allUsers);
   if (!userIds?.length) {

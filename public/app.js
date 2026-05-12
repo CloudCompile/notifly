@@ -37,7 +37,10 @@ const state = {
   activeFilter:  'all',
   filterPriority: '',
   filterRepo:    '',
+  inboxType:     'all',
   loading:       false,
+  page:          1,
+  hasMore:       true,
 };
 
 // ─── GitHub API ───────────────────────────────────────────────────────────────
@@ -59,7 +62,48 @@ async function ghFetch(path, opts = {}) {
 }
 
 async function fetchNotifications() {
-  return ghFetch('/notifications?all=false&per_page=50&participating=false');
+  const res = await ghFetch('/notifications?all=false&per_page=100&participating=false&page=1');
+  state.page = 1;
+  state.hasMore = res.length === 100;
+  return res;
+}
+
+async function loadMoreNotifications() {
+  state.page++;
+  try {
+    const more = await ghFetch(`/notifications?all=false&per_page=100&participating=false&page=${state.page}`);
+    state.notifications.push(...more);
+    state.hasMore = more.length === 100;
+    store.set(LS.NOTIFICATIONS, state.notifications);
+
+    // Auto-label new notifications if Pollinations key exists
+    if (skKey()) {
+      const unlabeled = more.filter((n) => !state.aiLabels[n.id]);
+      if (unlabeled.length > 0) {
+        try {
+          for (let i = 0; i < unlabeled.length; i += 20) {
+            const batch = unlabeled.slice(i, i + 20);
+            const [labels, priorities] = await Promise.all([
+              aiLabelBatch(batch),
+              aiPrioritizeBatch(batch),
+            ]);
+            Object.assign(state.aiLabels, labels);
+            Object.assign(state.aiPriorities, priorities);
+          }
+          store.set(LS.AI_LABELS, state.aiLabels);
+          store.set(LS.AI_PRIORITIES, state.aiPriorities);
+          await syncLabelsToServer();
+        } catch (err) {
+          console.warn('Auto-labeling failed:', err.message);
+        }
+      }
+    }
+
+    return more;
+  } catch (err) {
+    state.page--;
+    throw err;
+  }
 }
 
 async function markRead(threadId) {
@@ -166,6 +210,35 @@ async function aiGenerateDigest(notifications) {
     },
     { role: 'user', content: `Digest these notifications:\n${summary}` },
   ]);
+}
+
+async function syncLabelsToServer() {
+  try {
+    await fetch('/api/user/labels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ai_labels: state.aiLabels,
+        ai_priorities: state.aiPriorities,
+      }),
+    });
+  } catch (err) {
+    console.warn('Failed to sync labels to server:', err.message);
+  }
+}
+
+async function loadLabelsFromServer() {
+  try {
+    const res = await fetch('/api/user/labels');
+    if (!res.ok) return;
+    const data = await res.json();
+    state.aiLabels = data.ai_labels || {};
+    state.aiPriorities = data.ai_priorities || {};
+    store.set(LS.AI_LABELS, state.aiLabels);
+    store.set(LS.AI_PRIORITIES, state.aiPriorities);
+  } catch (err) {
+    console.warn('Failed to load labels from server:', err.message);
+  }
 }
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -306,6 +379,13 @@ function applyFilters(notifications) {
   return notifications.filter((n) => {
     if (state.doneState[n.id]) return false;
 
+    // Inbox type filter (from route)
+    if (state.inboxType === 'mention' && state.aiLabels[n.id] !== 'mention') return false;
+    if (state.inboxType === 'review-requested' && state.aiLabels[n.id] !== 'review-requested') return false;
+    if (state.inboxType === 'ci-failure' && state.aiLabels[n.id] !== 'ci-failure') return false;
+    if (state.inboxType === 'unread' && state.readState[n.id]) return false;
+
+    // Filter bar filters
     const filter = state.activeFilter;
     if (filter === 'unread'  && state.readState[n.id]) return false;
     if (filter === 'mention' && state.aiLabels[n.id] !== 'mention') return false;
@@ -335,6 +415,10 @@ function renderInbox() {
   visible.forEach((n, i) => {
     list.appendChild(renderNotifCard(n, i));
   });
+
+  // Show/hide load more button
+  const loadMoreArea = document.getElementById('load-more-area');
+  loadMoreArea.classList.toggle('hidden', !state.hasMore || visible.length === 0);
 
   updateRepoFilter();
 }
@@ -493,34 +577,44 @@ function renderSettings() {
 // ─── Router ───────────────────────────────────────────────────────────────────
 const ROUTES = ['inbox', 'dashboard', 'digest', 'settings'];
 
-function navigate(route) {
-  if (!ROUTES.includes(route)) route = 'inbox';
+function navigate(route, inboxType = null) {
+  const baseRoute = route.split('/')[0];
+  if (!ROUTES.includes(baseRoute)) route = baseRoute = 'inbox';
+
+  if (inboxType) state.inboxType = inboxType;
 
   // Update sidebar active state
-  document.querySelectorAll('.sidebar-link').forEach((link) => {
-    link.classList.toggle('active', link.dataset.route === route);
+  document.querySelectorAll('.sidebar-link, .sidebar-sublink').forEach((link) => {
+    const isActive = link.dataset.route === baseRoute && (!inboxType || link.dataset.type === inboxType);
+    link.classList.toggle('active', isActive);
   });
 
   // Show/hide views
   ROUTES.forEach((r) => {
-    document.getElementById(`view-${r}`)?.classList.toggle('hidden', r !== route);
+    document.getElementById(`view-${r}`)?.classList.toggle('hidden', r !== baseRoute);
   });
 
   // Trigger route-specific render
-  if (route === 'inbox')     renderInbox();
-  if (route === 'dashboard') renderDashboard();
-  if (route === 'digest')    renderDigest();
-  if (route === 'settings')  renderSettings();
+  if (baseRoute === 'inbox')     renderInbox();
+  if (baseRoute === 'dashboard') renderDashboard();
+  if (baseRoute === 'digest')    renderDigest();
+  if (baseRoute === 'settings')  renderSettings();
 }
 
 function initRouter() {
   const getRoute = () => {
     const hash = location.hash.replace(/^#\/?/, '');
-    const route = hash.split('?')[0];
-    return ROUTES.includes(route) ? route : 'inbox';
+    const [route, query] = hash.split('?');
+    const [baseRoute, inboxType] = route.split('/');
+    if (!ROUTES.includes(baseRoute)) return { base: 'inbox', type: null };
+    return { base: baseRoute, type: inboxType || null };
   };
-  window.addEventListener('hashchange', () => navigate(getRoute()));
-  navigate(getRoute());
+  window.addEventListener('hashchange', () => {
+    const { base, type } = getRoute();
+    navigate(base, type);
+  });
+  const { base, type } = getRoute();
+  navigate(base, type);
 }
 
 // ─── Auth flow ────────────────────────────────────────────────────────────────
@@ -671,6 +765,7 @@ function bindInboxEvents() {
 
       store.set(LS.AI_LABELS, state.aiLabels);
       store.set(LS.AI_PRIORITIES, state.aiPriorities);
+      await syncLabelsToServer();
       renderInbox();
       toast('AI labels applied!', 'success');
     } catch (err) {
@@ -678,6 +773,23 @@ function bindInboxEvents() {
     } finally {
       btn.disabled = false;
       btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg> AI Label All';
+    }
+  });
+
+  // Load more
+  document.getElementById('btn-load-more')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-load-more');
+    btn.disabled = true;
+    btn.innerHTML = 'Loading…';
+    try {
+      await loadMoreNotifications();
+      renderInbox();
+      toast(`Loaded more notifications`, 'success');
+    } catch (err) {
+      toast(`Failed to load more: ${err.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = 'Load More';
     }
   });
 
@@ -796,6 +908,27 @@ function bindSettingsEvents() {
 }
 
 function bindGlobalEvents() {
+  // Inbox submenu toggle
+  document.getElementById('inbox-expand')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    const submenu = e.currentTarget.closest('.sidebar-group').querySelector('.sidebar-submenu');
+    submenu.classList.toggle('hidden');
+    e.currentTarget.setAttribute('aria-expanded', !submenu.classList.contains('hidden'));
+  });
+
+  // Inbox sublinks
+  document.querySelectorAll('.sidebar-sublink').forEach((link) => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const type = link.dataset.type;
+      navigate('inbox', type === 'all' ? null : type);
+      window.location.hash = type === 'all' ? '#/inbox/all' : `#/inbox/${type}`;
+      if (window.innerWidth <= 640) {
+        document.getElementById('sidebar').classList.remove('mobile-open');
+      }
+    });
+  });
+
   // Sidebar toggle
   document.getElementById('sidebar-toggle')?.addEventListener('click', () => {
     const sidebar = document.getElementById('sidebar');
@@ -874,6 +1007,7 @@ async function showApp() {
   bindSettingsEvents();
 
   await loadNotifications();
+  await loadLabelsFromServer();
   updateUnreadBadge();
   renderInbox();
 
