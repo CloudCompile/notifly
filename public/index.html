@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0d1117" />
+  <meta name="description" content="A beautiful, AI-powered GitHub notifications inbox" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Notifly</title>
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32.png" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- Auth screens (shown before login) -->
+  <div id="screen-auth" class="auth-screen hidden">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+          <rect width="48" height="48" rx="12" fill="#6366f1"/>
+          <path d="M14 34L22 14L30 28L34 20L38 28" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="10" cy="24" r="3" fill="white" opacity="0.6"/>
+        </svg>
+        <h1 class="auth-title">Notifly</h1>
+      </div>
+      <p class="auth-tagline">Your GitHub notifications, beautifully organized with AI.</p>
+      <button id="btn-github-login" class="btn btn-primary btn-lg">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
+        </svg>
+        Sign in with GitHub
+      </button>
+      <p class="auth-note">Notifly needs read access to your GitHub notifications.</p>
+    </div>
+  </div>
+
+  <!-- BYOP step — Pollinations authorization -->
+  <div id="screen-byop" class="auth-screen hidden">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <span class="auth-step-badge">Step 2 of 2</span>
+      </div>
+      <h2 class="auth-title" style="font-size:1.5rem">Unlock AI features</h2>
+      <p class="auth-tagline">Connect your Pollinations account to enable smart labeling, priority scoring, and digest generation. You use your own API quota — no shared limits.</p>
+      <button id="btn-pollinations-auth" class="btn btn-primary btn-lg">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+        </svg>
+        Authorize with Pollinations
+      </button>
+      <button id="btn-skip-byop" class="btn btn-ghost">Skip for now (no AI features)</button>
+      <p class="auth-note">Your Pollinations sk_ key is stored only in your browser and your personal Vercel KV for digest delivery — never shared.</p>
+    </div>
+  </div>
+
+  <!-- Main app shell -->
+  <div id="app" class="app-layout hidden">
+    <!-- Sidebar -->
+    <nav id="sidebar" class="sidebar" role="navigation" aria-label="Main navigation">
+      <div class="sidebar-header">
+        <a href="/" class="sidebar-brand" aria-label="Notifly home">
+          <svg width="28" height="28" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+            <rect width="48" height="48" rx="12" fill="#6366f1"/>
+            <path d="M14 34L22 14L30 28L34 20L38 28" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="10" cy="24" r="3" fill="white" opacity="0.6"/>
+          </svg>
+          <span class="sidebar-brand-text">Notifly</span>
+        </a>
+        <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle sidebar" aria-expanded="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="sidebar-section">
+        <nav class="sidebar-nav">
+          <a href="#/inbox" class="sidebar-link" data-route="inbox">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
+            </svg>
+            <span>Inbox</span>
+            <span id="unread-badge" class="badge badge-accent" aria-live="polite"></span>
+          </a>
+          <a href="#/dashboard" class="sidebar-link" data-route="dashboard">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+            </svg>
+            <span>Dashboard</span>
+          </a>
+          <a href="#/digest" class="sidebar-link" data-route="digest">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
+            </svg>
+            <span>Digest</span>
+          </a>
+          <a href="#/settings" class="sidebar-link" data-route="settings">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+            <span>Settings</span>
+          </a>
+        </nav>
+      </div>
+
+      <div class="sidebar-footer">
+        <div id="user-avatar-area" class="user-chip">
+          <img id="user-avatar" src="" alt="" class="avatar avatar-sm" />
+          <span id="user-login" class="user-login mono"></span>
+        </div>
+        <button id="btn-refresh" class="btn btn-ghost btn-icon" title="Refresh notifications" aria-label="Refresh notifications">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+          </svg>
+        </button>
+      </div>
+    </nav>
+
+    <!-- Main content area -->
+    <main id="main-content" class="main-content" role="main">
+      <!-- Views injected here by router -->
+      <div id="view-inbox" class="view hidden">
+        <div class="view-header">
+          <h2 class="view-title">Inbox</h2>
+          <div class="view-actions">
+            <button id="btn-mark-all-read" class="btn btn-ghost btn-sm">Mark all read</button>
+            <button id="btn-ai-label-all" class="btn btn-ghost btn-sm ai-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+              AI Label All
+            </button>
+          </div>
+        </div>
+        <!-- Filter bar -->
+        <div class="filter-bar" role="toolbar" aria-label="Notification filters">
+          <div class="filter-group">
+            <button class="filter-chip active" data-filter="all">All</button>
+            <button class="filter-chip" data-filter="unread">Unread</button>
+            <button class="filter-chip" data-filter="mention">Mentions</button>
+            <button class="filter-chip" data-filter="review-requested">Reviews</button>
+            <button class="filter-chip" data-filter="ci-failure">CI</button>
+          </div>
+          <div class="filter-group filter-group-right">
+            <select id="filter-priority" class="filter-select" aria-label="Filter by priority">
+              <option value="">All priority</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+            <select id="filter-repo" class="filter-select" aria-label="Filter by repo">
+              <option value="">All repos</option>
+            </select>
+          </div>
+        </div>
+        <!-- Notification list -->
+        <div id="notification-list" class="notification-list" role="list" aria-label="Notifications" aria-live="polite">
+          <div class="empty-state hidden" id="inbox-empty">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+            <p>You're all caught up!</p>
+          </div>
+          <div id="notif-skeleton" class="notif-skeleton-list" aria-hidden="true">
+            <div class="notif-skeleton"></div>
+            <div class="notif-skeleton"></div>
+            <div class="notif-skeleton"></div>
+            <div class="notif-skeleton"></div>
+            <div class="notif-skeleton"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-dashboard" class="view hidden">
+        <div class="view-header">
+          <h2 class="view-title">Dashboard</h2>
+        </div>
+        <div class="stats-bar" role="region" aria-label="Notification statistics">
+          <div class="stat-card">
+            <span class="stat-value" id="stat-unread">—</span>
+            <span class="stat-label">Unread</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="stat-prs">—</span>
+            <span class="stat-label">Pull Requests</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="stat-issues">—</span>
+            <span class="stat-label">Issues</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="stat-ci">—</span>
+            <span class="stat-label">CI Failures</span>
+          </div>
+        </div>
+        <div class="dashboard-grid">
+          <div class="panel" id="ai-overview-panel">
+            <div class="panel-header">
+              <h3 class="panel-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+                AI Overview
+              </h3>
+              <button id="btn-refresh-overview" class="btn btn-ghost btn-icon btn-sm" title="Refresh AI overview" aria-label="Refresh AI overview">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              </button>
+            </div>
+            <div id="ai-overview-text" class="ai-overview-text mono">Generating overview…</div>
+          </div>
+          <div class="panel" id="priority-queue-panel">
+            <div class="panel-header">
+              <h3 class="panel-title">Priority Queue</h3>
+              <span class="panel-subtitle">Top items needing action</span>
+            </div>
+            <div id="priority-queue-list" class="priority-queue-list"></div>
+          </div>
+          <div class="panel" id="repo-activity-panel">
+            <div class="panel-header">
+              <h3 class="panel-title">Most Active Repos</h3>
+            </div>
+            <div id="repo-activity-list" class="repo-activity-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-digest" class="view hidden">
+        <div class="view-header">
+          <h2 class="view-title">Digest</h2>
+          <div class="view-actions">
+            <button id="btn-gen-digest" class="btn btn-primary btn-sm ai-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              Generate Fresh Digest
+            </button>
+          </div>
+        </div>
+        <div id="digest-content" class="digest-content">
+          <div class="digest-empty" id="digest-empty">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <p>No digest yet. Generate one above or wait for your scheduled digest.</p>
+          </div>
+          <div id="digest-card" class="digest-card hidden">
+            <div class="digest-meta">
+              <span id="digest-timestamp" class="mono"></span>
+              <span id="digest-notif-count" class="badge"></span>
+            </div>
+            <div id="digest-body" class="digest-body"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-settings" class="view hidden">
+        <div class="view-header">
+          <h2 class="view-title">Settings</h2>
+        </div>
+        <div class="settings-grid">
+          <div class="panel">
+            <div class="panel-header"><h3 class="panel-title">Digest Delivery</h3></div>
+            <div class="settings-form">
+              <div class="form-group">
+                <label class="form-label">Discord Webhook URL</label>
+                <input type="url" id="setting-discord" class="form-input mono" placeholder="https://discord.com/api/webhooks/..." autocomplete="off" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Schedule</label>
+                <div class="checkbox-group" role="group" aria-label="Digest schedule">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="sched-morning" value="morning" />
+                    <span>Morning digest (7 AM UTC)</span>
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="sched-nightly" value="nightly" />
+                    <span>Nightly digest (9 PM UTC)</span>
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="sched-weekly" value="weekly" />
+                    <span>Weekly digest (Sunday 8 AM UTC)</span>
+                  </label>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Delivery Method</label>
+                <div class="checkbox-group" role="group" aria-label="Delivery method">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="delivery-discord" value="discord" />
+                    <span>Discord</span>
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="delivery-push" value="push" />
+                    <span>Web Push</span>
+                  </label>
+                </div>
+              </div>
+              <button id="btn-save-prefs" class="btn btn-primary">Save Preferences</button>
+              <div id="save-prefs-status" class="form-status"></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header"><h3 class="panel-title">AI (Pollinations)</h3></div>
+            <div class="settings-form">
+              <div class="form-group">
+                <label class="form-label">Pollinations Key Status</label>
+                <div id="pollinations-key-status" class="key-status"></div>
+              </div>
+              <button id="btn-reauth-pollinations" class="btn btn-ghost btn-sm">Re-authorize Pollinations</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header"><h3 class="panel-title">Account</h3></div>
+            <div class="settings-form">
+              <div class="form-group">
+                <div id="settings-user-info" class="user-info-card"></div>
+              </div>
+              <button id="btn-logout" class="btn btn-danger btn-sm">Sign out</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toast-container" class="toast-container" role="status" aria-live="polite" aria-atomic="false"></div>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

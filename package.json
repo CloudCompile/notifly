@@ -1,0 +1,22 @@
+{
+  "name": "notifly",
+  "version": "0.1.0",
+  "description": "A beautiful, AI-powered GitHub notifications inbox PWA",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "echo 'Static build — no bundler required'",
+    "generate-vapid": "node scripts/generate-vapid.js"
+  },
+  "dependencies": {
+    "@vercel/kv": "^1.0.0",
+    "cookie": "^0.6.0",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "vercel": "^33.0.0"
+  }
+}
