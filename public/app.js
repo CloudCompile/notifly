@@ -37,6 +37,7 @@ const state = {
   activeFilter:  'all',
   filterPriority: '',
   filterRepo:    '',
+  inboxType:     'all',
   loading:       false,
 };
 
@@ -59,7 +60,7 @@ async function ghFetch(path, opts = {}) {
 }
 
 async function fetchNotifications() {
-  return ghFetch('/notifications?all=false&per_page=50&participating=false');
+  return ghFetch('/notifications?all=false&per_page=100&participating=false');
 }
 
 async function markRead(threadId) {
@@ -306,6 +307,13 @@ function applyFilters(notifications) {
   return notifications.filter((n) => {
     if (state.doneState[n.id]) return false;
 
+    // Inbox type filter (from route)
+    if (state.inboxType === 'mention' && state.aiLabels[n.id] !== 'mention') return false;
+    if (state.inboxType === 'review-requested' && state.aiLabels[n.id] !== 'review-requested') return false;
+    if (state.inboxType === 'ci-failure' && state.aiLabels[n.id] !== 'ci-failure') return false;
+    if (state.inboxType === 'unread' && state.readState[n.id]) return false;
+
+    // Filter bar filters
     const filter = state.activeFilter;
     if (filter === 'unread'  && state.readState[n.id]) return false;
     if (filter === 'mention' && state.aiLabels[n.id] !== 'mention') return false;
@@ -493,34 +501,44 @@ function renderSettings() {
 // ─── Router ───────────────────────────────────────────────────────────────────
 const ROUTES = ['inbox', 'dashboard', 'digest', 'settings'];
 
-function navigate(route) {
-  if (!ROUTES.includes(route)) route = 'inbox';
+function navigate(route, inboxType = null) {
+  const baseRoute = route.split('/')[0];
+  if (!ROUTES.includes(baseRoute)) route = baseRoute = 'inbox';
+
+  if (inboxType) state.inboxType = inboxType;
 
   // Update sidebar active state
-  document.querySelectorAll('.sidebar-link').forEach((link) => {
-    link.classList.toggle('active', link.dataset.route === route);
+  document.querySelectorAll('.sidebar-link, .sidebar-sublink').forEach((link) => {
+    const isActive = link.dataset.route === baseRoute && (!inboxType || link.dataset.type === inboxType);
+    link.classList.toggle('active', isActive);
   });
 
   // Show/hide views
   ROUTES.forEach((r) => {
-    document.getElementById(`view-${r}`)?.classList.toggle('hidden', r !== route);
+    document.getElementById(`view-${r}`)?.classList.toggle('hidden', r !== baseRoute);
   });
 
   // Trigger route-specific render
-  if (route === 'inbox')     renderInbox();
-  if (route === 'dashboard') renderDashboard();
-  if (route === 'digest')    renderDigest();
-  if (route === 'settings')  renderSettings();
+  if (baseRoute === 'inbox')     renderInbox();
+  if (baseRoute === 'dashboard') renderDashboard();
+  if (baseRoute === 'digest')    renderDigest();
+  if (baseRoute === 'settings')  renderSettings();
 }
 
 function initRouter() {
   const getRoute = () => {
     const hash = location.hash.replace(/^#\/?/, '');
-    const route = hash.split('?')[0];
-    return ROUTES.includes(route) ? route : 'inbox';
+    const [route, query] = hash.split('?');
+    const [baseRoute, inboxType] = route.split('/');
+    if (!ROUTES.includes(baseRoute)) return { base: 'inbox', type: null };
+    return { base: baseRoute, type: inboxType || null };
   };
-  window.addEventListener('hashchange', () => navigate(getRoute()));
-  navigate(getRoute());
+  window.addEventListener('hashchange', () => {
+    const { base, type } = getRoute();
+    navigate(base, type);
+  });
+  const { base, type } = getRoute();
+  navigate(base, type);
 }
 
 // ─── Auth flow ────────────────────────────────────────────────────────────────
@@ -796,6 +814,27 @@ function bindSettingsEvents() {
 }
 
 function bindGlobalEvents() {
+  // Inbox submenu toggle
+  document.getElementById('inbox-expand')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    const submenu = e.currentTarget.closest('.sidebar-group').querySelector('.sidebar-submenu');
+    submenu.classList.toggle('hidden');
+    e.currentTarget.setAttribute('aria-expanded', !submenu.classList.contains('hidden'));
+  });
+
+  // Inbox sublinks
+  document.querySelectorAll('.sidebar-sublink').forEach((link) => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const type = link.dataset.type;
+      navigate('inbox', type === 'all' ? null : type);
+      window.location.hash = type === 'all' ? '#/inbox/all' : `#/inbox/${type}`;
+      if (window.innerWidth <= 640) {
+        document.getElementById('sidebar').classList.remove('mobile-open');
+      }
+    });
+  });
+
   // Sidebar toggle
   document.getElementById('sidebar-toggle')?.addEventListener('click', () => {
     const sidebar = document.getElementById('sidebar');
