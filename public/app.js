@@ -739,7 +739,7 @@ function renderDigest() {
 }
 
 // ─── Render settings ──────────────────────────────────────────────────────────
-function renderSettings() {
+async function renderSettings() {
   const sk = skKey();
   const keyStatusEl = document.getElementById('pollinations-key-status');
   if (sk) {
@@ -761,6 +761,33 @@ function renderSettings() {
       </div>
     `;
   }
+
+  // Push notification status
+  const pushArea = document.getElementById('push-status-area');
+  const pushToggle = document.getElementById('push-notif-enabled');
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    pushArea.innerHTML = '<p class="form-status error" style="margin:0">Push notifications are not supported in this browser.</p>';
+    pushToggle.disabled = true;
+    return;
+  }
+
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      pushArea.innerHTML = '<p class="form-status success" style="margin:0">✓ This device is registered for push</p>';
+      document.getElementById('btn-register-push').textContent = 'Re-register device';
+    } else {
+      pushArea.innerHTML = '<p class="form-status" style="margin:0;color:var(--text-tertiary)">This device is not registered. Click below to enable push.</p>';
+    }
+  } catch {
+    pushArea.innerHTML = '';
+  }
+
+  // Load saved preference from server
+  fetch('/api/user/me').then((r) => r.ok ? r.json() : null).then((data) => {
+    if (data?.push_notif_enabled) pushToggle.checked = true;
+  }).catch(() => {});
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -1077,6 +1104,61 @@ function bindSettingsEvents() {
     } catch (err) {
       statusEl.textContent = `Error: ${err.message}`;
       statusEl.className = 'form-status error';
+    }
+  });
+
+  // Per-notification push toggle
+  document.getElementById('push-notif-enabled')?.addEventListener('change', async (e) => {
+    const enabled = e.target.checked;
+    const statusEl = document.getElementById('push-notif-status');
+    try {
+      if (enabled) {
+        // Must have push subscription first
+        const reg = await navigator.serviceWorker.ready;
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) {
+          await registerPush();
+          sub = await reg.pushManager.getSubscription();
+        }
+        if (!sub) {
+          e.target.checked = false;
+          toast('Push registration failed — please register the device first', 'error');
+          return;
+        }
+      }
+      await fetch('/api/user/save-prefs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ push_notif_enabled: enabled }),
+      });
+      statusEl.textContent = enabled ? 'Per-notification push enabled' : 'Per-notification push disabled';
+      statusEl.className = 'form-status success';
+      setTimeout(() => { statusEl.textContent = ''; statusEl.className = 'form-status'; }, 3000);
+      toast(enabled ? 'Push notifications enabled' : 'Push notifications disabled', 'success');
+    } catch (err) {
+      e.target.checked = !enabled;
+      statusEl.textContent = `Error: ${err.message}`;
+      statusEl.className = 'form-status error';
+    }
+  });
+
+  document.getElementById('btn-register-push')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-register-push');
+    const statusEl = document.getElementById('push-notif-status');
+    btn.disabled = true;
+    try {
+      await registerPush();
+      statusEl.textContent = '✓ Device registered for push';
+      statusEl.className = 'form-status success';
+      document.getElementById('push-status-area').innerHTML =
+        '<p class="form-status success" style="margin:0">✓ This device is registered for push</p>';
+      btn.textContent = 'Re-register device';
+      setTimeout(() => { statusEl.textContent = ''; statusEl.className = 'form-status'; }, 3000);
+    } catch (err) {
+      statusEl.textContent = `Registration failed: ${err.message}`;
+      statusEl.className = 'form-status error';
+    } finally {
+      btn.disabled = false;
     }
   });
 

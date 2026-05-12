@@ -35,6 +35,13 @@ export default async function handler(req, res) {
   if (body.push_sub) {
     updates.push(kv.set(keys.pushSub(uid), JSON.stringify(body.push_sub)));
   }
+  if (body.push_notif_enabled !== undefined) {
+    updates.push(
+      body.push_notif_enabled
+        ? kv.set(keys.pushNotifEnabled(uid), '1')
+        : kv.del(keys.pushNotifEnabled(uid)),
+    );
+  }
 
   await Promise.all(updates);
   res.status(200).json({ ok: true });
