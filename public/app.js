@@ -75,6 +75,30 @@ async function loadMoreNotifications() {
     state.notifications.push(...more);
     state.hasMore = more.length === 100;
     store.set(LS.NOTIFICATIONS, state.notifications);
+
+    // Auto-label new notifications if Pollinations key exists
+    if (skKey()) {
+      const unlabeled = more.filter((n) => !state.aiLabels[n.id]);
+      if (unlabeled.length > 0) {
+        try {
+          for (let i = 0; i < unlabeled.length; i += 20) {
+            const batch = unlabeled.slice(i, i + 20);
+            const [labels, priorities] = await Promise.all([
+              aiLabelBatch(batch),
+              aiPrioritizeBatch(batch),
+            ]);
+            Object.assign(state.aiLabels, labels);
+            Object.assign(state.aiPriorities, priorities);
+          }
+          store.set(LS.AI_LABELS, state.aiLabels);
+          store.set(LS.AI_PRIORITIES, state.aiPriorities);
+          await syncLabelsToServer();
+        } catch (err) {
+          console.warn('Auto-labeling failed:', err.message);
+        }
+      }
+    }
+
     return more;
   } catch (err) {
     state.page--;
@@ -186,6 +210,35 @@ async function aiGenerateDigest(notifications) {
     },
     { role: 'user', content: `Digest these notifications:\n${summary}` },
   ]);
+}
+
+async function syncLabelsToServer() {
+  try {
+    await fetch('/api/user/labels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ai_labels: state.aiLabels,
+        ai_priorities: state.aiPriorities,
+      }),
+    });
+  } catch (err) {
+    console.warn('Failed to sync labels to server:', err.message);
+  }
+}
+
+async function loadLabelsFromServer() {
+  try {
+    const res = await fetch('/api/user/labels');
+    if (!res.ok) return;
+    const data = await res.json();
+    state.aiLabels = data.ai_labels || {};
+    state.aiPriorities = data.ai_priorities || {};
+    store.set(LS.AI_LABELS, state.aiLabels);
+    store.set(LS.AI_PRIORITIES, state.aiPriorities);
+  } catch (err) {
+    console.warn('Failed to load labels from server:', err.message);
+  }
 }
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -712,6 +765,7 @@ function bindInboxEvents() {
 
       store.set(LS.AI_LABELS, state.aiLabels);
       store.set(LS.AI_PRIORITIES, state.aiPriorities);
+      await syncLabelsToServer();
       renderInbox();
       toast('AI labels applied!', 'success');
     } catch (err) {
@@ -953,6 +1007,7 @@ async function showApp() {
   bindSettingsEvents();
 
   await loadNotifications();
+  await loadLabelsFromServer();
   updateUnreadBadge();
   renderInbox();
 

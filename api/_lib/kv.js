@@ -13,6 +13,8 @@ export const keys = {
   digestSchedule: (uid) => `user:${uid}:digest_schedule`,
   pushSub: (uid) => `user:${uid}:push_sub`,
   latestDigest: (uid) => `user:${uid}:latest_digest`,
+  aiLabels: (uid) => `user:${uid}:ai_labels`,
+  aiPriorities: (uid) => `user:${uid}:ai_priorities`,
   // maps session id → uid
   session: (sid) => `session:${sid}`,
   // set of all user ids for cron iteration
