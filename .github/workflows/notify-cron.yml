@@ -1,0 +1,18 @@
+name: Push Notifications Cron
+
+on:
+  schedule:
+    - cron: '* * * * *'
+  workflow_dispatch: # allow manual trigger for testing
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Trigger notify endpoint
+        run: |
+          curl -sf -X GET "${{ secrets.APP_URL }}/api/cron/notify" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --retry 2 \
+            --retry-delay 3

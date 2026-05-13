@@ -8,10 +8,11 @@ export default async function handler(req, res) {
     return;
   }
 
-  const [discordWebhook, digestSchedule, latestDigest] = await Promise.all([
+  const [discordWebhook, digestSchedule, latestDigest, pushNotifEnabled] = await Promise.all([
     kv.get(keys.discordWebhook(uid)),
     kv.get(keys.digestSchedule(uid)),
     kv.get(keys.latestDigest(uid)),
+    kv.get(keys.pushNotifEnabled(uid)),
   ]);
 
   res.status(200).json({
@@ -19,5 +20,6 @@ export default async function handler(req, res) {
     discord_webhook: discordWebhook,
     digest_schedule: digestSchedule,
     latest_digest: latestDigest,
+    push_notif_enabled: !!pushNotifEnabled,
   });
 }

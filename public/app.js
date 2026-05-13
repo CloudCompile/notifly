@@ -145,7 +145,7 @@ async function aiLabelBatch(notifications) {
     {
       role: 'system',
       content:
-        'You are a GitHub notification classifier. For each numbered notification, respond with ONLY its index and one label separated by a colon, one per line. Labels: mention, review-requested, ci-failure, noise, fyi. Example:\n0: mention\n1: ci-failure',
+        'You are a GitHub notification triage expert. Classify each notification with exactly one label. Labels and their meanings:\n- mention: you are directly @mentioned or the primary subject\n- review-requested: your code review is explicitly requested\n- ci-failure: a CI/CD build, test, or deployment failed\n- noise: automated bots, dependabot, routine updates, no action needed\n- fyi: discussion, merged PRs, general activity worth knowing but no action needed\n\nRespond ONLY with index:label pairs, one per line. Example:\n0: mention\n1: noise\n2: ci-failure',
     },
     { role: 'user', content: `Classify these notifications:\n${items}` },
   ]);
@@ -170,7 +170,7 @@ async function aiPrioritizeBatch(notifications) {
     {
       role: 'system',
       content:
-        'You are a GitHub notification prioritizer. For each numbered notification respond with ONLY index:priority, one per line. Priority values: high, medium, low. Example:\n0: high\n1: low',
+        'You are a developer productivity expert. Prioritize each GitHub notification:\n- high: blocks your work, needs response today, security issue, production incident, direct mention needing reply\n- medium: needs attention this week, review requested, PR feedback, important discussion\n- low: informational, already resolved, automated updates, no action required\n\nRespond ONLY with index:priority pairs, one per line. Example:\n0: high\n1: low',
     },
     { role: 'user', content: `Prioritize:\n${items}` },
   ]);
@@ -193,7 +193,7 @@ async function aiOverview(notifications) {
   return aiChat([
     {
       role: 'system',
-      content: 'You are a helpful GitHub assistant. Write 2-3 sentences summarizing the user\'s current notification inbox state. Be specific — mention repos or PR names. Conversational tone.',
+      content: 'You are a senior developer\'s personal assistant. In 3-4 sentences, give a sharp inbox briefing: what needs attention right now, any patterns or themes across repos, and whether the user is behind or on top of things. Be specific — name actual repos and PR titles. Conversational but professional.',
     },
     { role: 'user', content: `My current notifications:\n${summary}` },
   ]);
@@ -206,10 +206,18 @@ async function aiGenerateDigest(notifications) {
   return aiChat([
     {
       role: 'system',
-      content: 'Create a scannable GitHub notification digest. Use emoji section headers (🔴 Action Required, 🟡 FYI, ✅ Nothing Urgent). Highlight action items. Under 300 words.',
+      content: 'Create a concise GitHub notification digest. Structure it with these sections (skip empty ones):\n🔴 **Action Required** — things blocking progress or needing reply today\n🟡 **This Week** — PRs to review, discussions to engage with\n✅ **Done/FYI** — merged PRs, resolved issues, no action needed\n🤖 **Noise** — automated updates to be aware of\n\nFor each item include: repo name, brief description, and specific next action. Keep it under 350 words. Be direct and useful, not verbose.',
     },
     { role: 'user', content: `Digest these notifications:\n${summary}` },
   ]);
+}
+
+// ─── Markdown renderer ────────────────────────────────────────────────────────
+function renderMd(text) {
+  if (!text) return '';
+  if (typeof marked === 'undefined') return escHtml(text).replace(/\n/g, '<br>');
+  marked.setOptions({ breaks: true, gfm: true });
+  return marked.parse(text);
 }
 
 async function syncLabelsToServer() {
@@ -470,14 +478,14 @@ async function openDetailPanel(notif) {
     aiChat([
       {
         role: 'system',
-        content: 'You are a concise GitHub assistant. In 2-4 sentences, explain what this notification is about, why it matters, and what (if any) action the user should take. Be specific and direct.',
+        content: 'You are a concise code reviewer\'s assistant. For this GitHub notification, answer in 2-3 sentences:\n1. What is happening (specific context, not just the title)\n2. What action (if any) is needed and how urgent it is\n\nBe direct. If no action needed, say so clearly.',
       },
       {
         role: 'user',
         content: `Notification: [${notif.reason}] ${notif.repository?.full_name}: ${notif.subject?.title} (${notif.subject?.type})`,
       },
     ]).then((text) => {
-      aiEl.textContent = text;
+      aiEl.innerHTML = renderMd(text);
       aiEl.classList.remove('loading');
     }).catch(() => {
       aiEl.textContent = 'Could not generate summary.';
@@ -544,7 +552,7 @@ async function openDetailPanel(notif) {
               <span class="detail-comment-author">${escHtml(c.user?.login || '—')}</span>
               <span class="detail-comment-time">${relativeTime(c.updated_at || c.created_at)}</span>
             </div>
-            <div class="detail-comment-body">${escHtml(c.body?.trim() || '')}</div>
+            <div class="detail-comment-body md-body">${renderMd(c.body?.trim() || '')}</div>
           `;
           threadBody.appendChild(el);
         });
@@ -706,7 +714,7 @@ function renderDashboard() {
   const overviewEl = document.getElementById('ai-overview-text');
   if (sk && notifs.length > 0) {
     aiOverview(notifs)
-      .then((text) => { overviewEl.textContent = text; })
+      .then((text) => { overviewEl.innerHTML = renderMd(text); })
       .catch(() => { overviewEl.textContent = 'AI overview unavailable.'; });
   } else if (!sk) {
     overviewEl.textContent = 'Connect your Pollinations account in Settings to enable AI overview.';
@@ -735,11 +743,11 @@ function renderDigest() {
   const countBadge = document.getElementById('digest-notif-count');
   countBadge.textContent = `${digestData.notification_count} notifications`;
   countBadge.className = 'badge badge-accent';
-  document.getElementById('digest-body').textContent = digestData.content;
+  document.getElementById('digest-body').innerHTML = renderMd(digestData.content);
 }
 
 // ─── Render settings ──────────────────────────────────────────────────────────
-function renderSettings() {
+async function renderSettings() {
   const sk = skKey();
   const keyStatusEl = document.getElementById('pollinations-key-status');
   if (sk) {
@@ -761,6 +769,33 @@ function renderSettings() {
       </div>
     `;
   }
+
+  // Push notification status
+  const pushArea = document.getElementById('push-status-area');
+  const pushToggle = document.getElementById('push-notif-enabled');
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    pushArea.innerHTML = '<p class="form-status error" style="margin:0">Push notifications are not supported in this browser.</p>';
+    pushToggle.disabled = true;
+    return;
+  }
+
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      pushArea.innerHTML = '<p class="form-status success" style="margin:0">✓ This device is registered for push</p>';
+      document.getElementById('btn-register-push').textContent = 'Re-register device';
+    } else {
+      pushArea.innerHTML = '<p class="form-status" style="margin:0;color:var(--text-tertiary)">This device is not registered. Click below to enable push.</p>';
+    }
+  } catch {
+    pushArea.innerHTML = '';
+  }
+
+  // Load saved preference from server
+  fetch('/api/user/me').then((r) => r.ok ? r.json() : null).then((data) => {
+    if (data?.push_notif_enabled) pushToggle.checked = true;
+  }).catch(() => {});
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -1017,7 +1052,7 @@ function bindDashboardEvents() {
     if (!skKey()) { toast('No Pollinations key', 'error'); return; }
     overviewEl.textContent = 'Generating…';
     aiOverview(state.notifications)
-      .then((text) => { overviewEl.textContent = text; })
+      .then((text) => { overviewEl.innerHTML = renderMd(text); })
       .catch(() => { overviewEl.textContent = 'AI overview unavailable.'; });
   });
 }
@@ -1077,6 +1112,61 @@ function bindSettingsEvents() {
     } catch (err) {
       statusEl.textContent = `Error: ${err.message}`;
       statusEl.className = 'form-status error';
+    }
+  });
+
+  // Per-notification push toggle
+  document.getElementById('push-notif-enabled')?.addEventListener('change', async (e) => {
+    const enabled = e.target.checked;
+    const statusEl = document.getElementById('push-notif-status');
+    try {
+      if (enabled) {
+        // Must have push subscription first
+        const reg = await navigator.serviceWorker.ready;
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) {
+          await registerPush();
+          sub = await reg.pushManager.getSubscription();
+        }
+        if (!sub) {
+          e.target.checked = false;
+          toast('Push registration failed — please register the device first', 'error');
+          return;
+        }
+      }
+      await fetch('/api/user/save-prefs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ push_notif_enabled: enabled }),
+      });
+      statusEl.textContent = enabled ? 'Per-notification push enabled' : 'Per-notification push disabled';
+      statusEl.className = 'form-status success';
+      setTimeout(() => { statusEl.textContent = ''; statusEl.className = 'form-status'; }, 3000);
+      toast(enabled ? 'Push notifications enabled' : 'Push notifications disabled', 'success');
+    } catch (err) {
+      e.target.checked = !enabled;
+      statusEl.textContent = `Error: ${err.message}`;
+      statusEl.className = 'form-status error';
+    }
+  });
+
+  document.getElementById('btn-register-push')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-register-push');
+    const statusEl = document.getElementById('push-notif-status');
+    btn.disabled = true;
+    try {
+      await registerPush();
+      statusEl.textContent = '✓ Device registered for push';
+      statusEl.className = 'form-status success';
+      document.getElementById('push-status-area').innerHTML =
+        '<p class="form-status success" style="margin:0">✓ This device is registered for push</p>';
+      btn.textContent = 'Re-register device';
+      setTimeout(() => { statusEl.textContent = ''; statusEl.className = 'form-status'; }, 3000);
+    } catch (err) {
+      statusEl.textContent = `Registration failed: ${err.message}`;
+      statusEl.className = 'form-status error';
+    } finally {
+      btn.disabled = false;
     }
   });
 
