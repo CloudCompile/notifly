@@ -824,12 +824,32 @@ async function renderSettings() {
     `;
   }
 
-  // Push notification status
+  // Load saved prefs from server and populate form
+  try {
+    const data = await fetch('/api/user/me').then((r) => r.ok ? r.json() : null);
+    if (data) {
+      const discordEl = document.getElementById('setting-discord');
+      if (discordEl && data.discord_webhook) discordEl.value = data.discord_webhook;
+
+      const schedule = data.digest_schedule || [];
+      const morning = document.getElementById('sched-morning');
+      const nightly = document.getElementById('sched-nightly');
+      const weekly  = document.getElementById('sched-weekly');
+      if (morning) morning.checked = schedule.includes('morning');
+      if (nightly) nightly.checked = schedule.includes('nightly');
+      if (weekly)  weekly.checked  = schedule.includes('weekly');
+
+      const pushToggle = document.getElementById('push-notif-enabled');
+      if (pushToggle && data.push_notif_enabled) pushToggle.checked = true;
+    }
+  } catch { /* server unavailable — form stays blank */ }
+
+  // Push registration status
   const pushArea = document.getElementById('push-status-area');
   const pushToggle = document.getElementById('push-notif-enabled');
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     pushArea.innerHTML = '<p class="form-status error" style="margin:0">Push notifications are not supported in this browser.</p>';
-    pushToggle.disabled = true;
+    if (pushToggle) pushToggle.disabled = true;
     return;
   }
 
@@ -845,11 +865,6 @@ async function renderSettings() {
   } catch {
     pushArea.innerHTML = '';
   }
-
-  // Load saved preference from server
-  fetch('/api/user/me').then((r) => r.ok ? r.json() : null).then((data) => {
-    if (data?.push_notif_enabled) pushToggle.checked = true;
-  }).catch(() => {});
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -1148,7 +1163,7 @@ function bindSettingsEvents() {
     const statusEl = document.getElementById('save-prefs-status');
 
     try {
-      await fetch('/api/user/save-prefs', {
+      const res = await fetch('/api/user/save-prefs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1156,6 +1171,7 @@ function bindSettingsEvents() {
           digest_schedule: schedule,
         }),
       });
+      if (!res.ok) throw new Error(`Server error ${res.status} — are you signed in?`);
 
       if (pushDel) await registerPush();
 
