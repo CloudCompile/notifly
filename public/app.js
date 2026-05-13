@@ -106,6 +106,60 @@ async function loadMoreNotifications() {
   }
 }
 
+async function backgroundFetchAll() {
+  if (!state.hasMore) return;
+  // Small delay so first render completes before we start hammering the API
+  await new Promise((r) => setTimeout(r, 1200));
+
+  while (state.hasMore) {
+    try {
+      state.page++;
+      const more = await ghFetch(`/notifications?all=false&per_page=100&participating=false&page=${state.page}`);
+      if (!more.length) { state.hasMore = false; break; }
+
+      state.notifications.push(...more);
+      state.hasMore = more.length === 100;
+      store.set(LS.NOTIFICATIONS, state.notifications);
+
+      // Re-render incrementally so counts update as pages arrive
+      updateUnreadBadge();
+      renderInbox();
+      if (document.getElementById('view-dashboard')?.classList.contains('hidden') === false) {
+        renderDashboard();
+      }
+
+      // Auto-label new batch if key exists (fire-and-forget, don't block next page)
+      if (skKey()) {
+        const unlabeled = more.filter((n) => !state.aiLabels[n.id]);
+        if (unlabeled.length > 0) {
+          (async () => {
+            try {
+              for (let i = 0; i < unlabeled.length; i += 20) {
+                const batch = unlabeled.slice(i, i + 20);
+                const [labels, priorities] = await Promise.all([
+                  aiLabelBatch(batch),
+                  aiPrioritizeBatch(batch),
+                ]);
+                Object.assign(state.aiLabels, labels);
+                Object.assign(state.aiPriorities, priorities);
+              }
+              store.set(LS.AI_LABELS, state.aiLabels);
+              store.set(LS.AI_PRIORITIES, state.aiPriorities);
+              syncLabelsToServer().catch(() => {});
+            } catch { /* labeling failures don't stop pagination */ }
+          })();
+        }
+      }
+
+      // Brief pause between pages to be nice to the GitHub API rate limit
+      if (state.hasMore) await new Promise((r) => setTimeout(r, 300));
+    } catch {
+      state.page--;
+      break;
+    }
+  }
+}
+
 async function markRead(threadId) {
   const token = ghToken();
   await fetch(`${GH_API}/notifications/threads/${threadId}`, {
@@ -1245,6 +1299,7 @@ function bindGlobalEvents() {
     updateUnreadBadge();
     renderInbox();
     toast('Notifications refreshed', 'success');
+    backgroundFetchAll();
   });
 
   // Auth screen buttons
@@ -1290,6 +1345,9 @@ async function showApp() {
   await loadLabelsFromServer();
   updateUnreadBadge();
   renderInbox();
+
+  // Pull remaining pages silently in the background
+  backgroundFetchAll();
 
   // Background check for latest digest from server
   fetch('/api/user/me')
