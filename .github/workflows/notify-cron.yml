@@ -2,8 +2,7 @@ name: Push Notifications Cron
 
 on:
   schedule:
-    # Runs every 5 minutes (GitHub's minimum effective interval)
-    - cron: '*/5 * * * *'
+    - cron: '* * * * *'
   workflow_dispatch: # allow manual trigger for testing
 
 jobs:
