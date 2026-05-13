@@ -106,6 +106,60 @@ async function loadMoreNotifications() {
   }
 }
 
+async function backgroundFetchAll() {
+  if (!state.hasMore) return;
+  // Small delay so first render completes before we start hammering the API
+  await new Promise((r) => setTimeout(r, 1200));
+
+  while (state.hasMore) {
+    try {
+      state.page++;
+      const more = await ghFetch(`/notifications?all=false&per_page=100&participating=false&page=${state.page}`);
+      if (!more.length) { state.hasMore = false; break; }
+
+      state.notifications.push(...more);
+      state.hasMore = more.length === 100;
+      store.set(LS.NOTIFICATIONS, state.notifications);
+
+      // Re-render incrementally so counts update as pages arrive
+      updateUnreadBadge();
+      renderInbox();
+      if (document.getElementById('view-dashboard')?.classList.contains('hidden') === false) {
+        renderDashboard();
+      }
+
+      // Auto-label new batch if key exists (fire-and-forget, don't block next page)
+      if (skKey()) {
+        const unlabeled = more.filter((n) => !state.aiLabels[n.id]);
+        if (unlabeled.length > 0) {
+          (async () => {
+            try {
+              for (let i = 0; i < unlabeled.length; i += 20) {
+                const batch = unlabeled.slice(i, i + 20);
+                const [labels, priorities] = await Promise.all([
+                  aiLabelBatch(batch),
+                  aiPrioritizeBatch(batch),
+                ]);
+                Object.assign(state.aiLabels, labels);
+                Object.assign(state.aiPriorities, priorities);
+              }
+              store.set(LS.AI_LABELS, state.aiLabels);
+              store.set(LS.AI_PRIORITIES, state.aiPriorities);
+              syncLabelsToServer().catch(() => {});
+            } catch { /* labeling failures don't stop pagination */ }
+          })();
+        }
+      }
+
+      // Brief pause between pages to be nice to the GitHub API rate limit
+      if (state.hasMore) await new Promise((r) => setTimeout(r, 300));
+    } catch {
+      state.page--;
+      break;
+    }
+  }
+}
+
 async function markRead(threadId) {
   const token = ghToken();
   await fetch(`${GH_API}/notifications/threads/${threadId}`, {
@@ -770,12 +824,32 @@ async function renderSettings() {
     `;
   }
 
-  // Push notification status
+  // Load saved prefs from server and populate form
+  try {
+    const data = await fetch('/api/user/me').then((r) => r.ok ? r.json() : null);
+    if (data) {
+      const discordEl = document.getElementById('setting-discord');
+      if (discordEl && data.discord_webhook) discordEl.value = data.discord_webhook;
+
+      const schedule = data.digest_schedule || [];
+      const morning = document.getElementById('sched-morning');
+      const nightly = document.getElementById('sched-nightly');
+      const weekly  = document.getElementById('sched-weekly');
+      if (morning) morning.checked = schedule.includes('morning');
+      if (nightly) nightly.checked = schedule.includes('nightly');
+      if (weekly)  weekly.checked  = schedule.includes('weekly');
+
+      const pushToggle = document.getElementById('push-notif-enabled');
+      if (pushToggle && data.push_notif_enabled) pushToggle.checked = true;
+    }
+  } catch { /* server unavailable — form stays blank */ }
+
+  // Push registration status
   const pushArea = document.getElementById('push-status-area');
   const pushToggle = document.getElementById('push-notif-enabled');
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     pushArea.innerHTML = '<p class="form-status error" style="margin:0">Push notifications are not supported in this browser.</p>';
-    pushToggle.disabled = true;
+    if (pushToggle) pushToggle.disabled = true;
     return;
   }
 
@@ -791,11 +865,6 @@ async function renderSettings() {
   } catch {
     pushArea.innerHTML = '';
   }
-
-  // Load saved preference from server
-  fetch('/api/user/me').then((r) => r.ok ? r.json() : null).then((data) => {
-    if (data?.push_notif_enabled) pushToggle.checked = true;
-  }).catch(() => {});
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -1094,7 +1163,7 @@ function bindSettingsEvents() {
     const statusEl = document.getElementById('save-prefs-status');
 
     try {
-      await fetch('/api/user/save-prefs', {
+      const res = await fetch('/api/user/save-prefs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1102,6 +1171,7 @@ function bindSettingsEvents() {
           digest_schedule: schedule,
         }),
       });
+      if (!res.ok) throw new Error(`Server error ${res.status} — are you signed in?`);
 
       if (pushDel) await registerPush();
 
@@ -1245,6 +1315,7 @@ function bindGlobalEvents() {
     updateUnreadBadge();
     renderInbox();
     toast('Notifications refreshed', 'success');
+    backgroundFetchAll();
   });
 
   // Auth screen buttons
@@ -1290,6 +1361,9 @@ async function showApp() {
   await loadLabelsFromServer();
   updateUnreadBadge();
   renderInbox();
+
+  // Pull remaining pages silently in the background
+  backgroundFetchAll();
 
   // Background check for latest digest from server
   fetch('/api/user/me')
